@@ -1,0 +1,7 @@
+flowchart LR
+  B[Browser / React dashboard] -->|email/password session| A[Express + tRPC backend]
+  B -->|direct PUT bytes + progress| S[(Private object storage)]
+  A -->|owner check + presign| P[Storage presign API]
+  P -->|temporary signed URL| A
+  A -->|metadata, owner ID, storage key| D[(Managed MySQL database)]
+  A -->|signed download URL| B
