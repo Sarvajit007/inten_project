@@ -74,3 +74,7 @@ The managed runtime exposes presigned PUT/GET operations but no runtime object-d
 ## Validation notes
 
 The server exposes `/api/health`, and the browser route manifest is available at `/manus-routes.json`. The implementation is type-checked with `pnpm check`; the database migration is additive and is applied with `pnpm db:push` during project setup.
+
+## Project report
+
+The delivered project report is available as [`Cloud-Files-Project-Report.pdf`](Cloud-Files-Project-Report.pdf), with editable Markdown source in [`report/report.md`](report/report.md). It includes the aim, implementation procedure, architecture diagram, deployment checkpoint, and authenticated dashboard screenshot.
