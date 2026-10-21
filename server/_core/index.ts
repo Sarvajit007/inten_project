@@ -5,7 +5,10 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
+import { completeFile, getFileById } from "../db";
+import { storageUploadBytes } from "../storage";
 import { createContext } from "./context";
+import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
 
 async function startServer() {
@@ -17,6 +20,38 @@ async function startServer() {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
+  });
+  // Fallback for private storage providers whose bucket CORS policy blocks browser PUT preflight.
+  // The normal client path remains direct-to-storage; this route is same-origin and owner-checked.
+  app.post("/api/files/upload-relay", express.raw({ type: "application/octet-stream", limit: "50mb" }), async (req, res) => {
+    try {
+      let user;
+      try {
+        user = await sdk.authenticateRequest(req);
+      } catch {
+        user = null;
+      }
+      if (!user) return res.status(401).json({ error: "Please sign in again." });
+      const fileId = req.get("x-file-id") || "";
+      const storageKey = req.get("x-storage-key") || "";
+      const file = await getFileById(fileId, user.id);
+      if (!file || file.status !== "pending" || file.storageKey !== storageKey) {
+        return res.status(403).json({ error: "Upload authorization is invalid or expired." });
+      }
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (body.length !== file.size) return res.status(400).json({ error: "Uploaded file size does not match the reservation." });
+      await storageUploadBytes(file.storageKey, body, req.get("content-type") || file.mimeType);
+      await completeFile(file.id, user.id, {
+        fileName: file.fileName,
+        size: file.size,
+        mimeType: file.mimeType,
+        storageKey: file.storageKey,
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error("Upload relay failed:", error);
+      return res.status(500).json({ error: "Upload failed while writing to private storage." });
+    }
   });
   registerOAuthRoutes(app);
   // tRPC API

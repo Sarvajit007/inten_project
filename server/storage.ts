@@ -30,6 +30,16 @@ export async function storagePresignPut(key: string) {
   return requestPresignedUrl("put", key);
 }
 
+export async function storageUploadBytes(key: string, data: Buffer, contentType = "application/octet-stream") {
+  const signedUrl = await storagePresignPut(key);
+  const response = await fetch(signedUrl, {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: new Blob([data as any], { type: contentType }),
+  });
+  if (!response.ok) throw new Error(`Storage upload failed (${response.status})`);
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,

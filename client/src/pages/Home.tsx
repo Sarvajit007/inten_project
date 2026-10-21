@@ -88,15 +88,39 @@ function AuthScreen() {
   );
 }
 
-function uploadWithProgress(url: string, file: globalThis.File, onProgress: (value: number) => void) {
+function uploadWithProgress(
+  pending: { uploadUrl: string; fileId: string; storageKey: string },
+  file: globalThis.File,
+  onProgress: (value: number) => void,
+) {
   return new Promise<void>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-    xhr.upload.onprogress = event => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
-    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("Storage rejected the upload."));
-    xhr.onerror = () => reject(new Error("Upload failed. Check your connection and try again."));
-    xhr.send(file);
+    let finished = false;
+    const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      error ? reject(error) : resolve();
+    };
+    const relayUpload = () => {
+      const relay = new XMLHttpRequest();
+      relay.open("POST", "/api/files/upload-relay");
+      relay.setRequestHeader("Content-Type", "application/octet-stream");
+      relay.setRequestHeader("X-File-Id", pending.fileId);
+      relay.setRequestHeader("X-Storage-Key", pending.storageKey);
+      relay.upload.onprogress = event => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
+      relay.onload = () => relay.status >= 200 && relay.status < 300
+        ? finish()
+        : finish(new Error("Upload failed while writing to private storage."));
+      relay.onerror = () => finish(new Error("Upload failed. Check your connection and try again."));
+      relay.send(file);
+    };
+    const direct = new XMLHttpRequest();
+    direct.open("PUT", pending.uploadUrl);
+    direct.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    direct.upload.onprogress = event => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
+    direct.onload = () => direct.status >= 200 && direct.status < 300 ? finish() : relayUpload();
+    // The managed private bucket currently rejects browser CORS preflight, so use the authenticated fallback.
+    direct.onerror = relayUpload;
+    direct.send(file);
   });
 }
 
@@ -120,7 +144,7 @@ function Dashboard({ user }: { user: { name: string | null; email: string | null
     setUploadProgress(0);
     try {
       const pending = await createUpload.mutateAsync({ fileName: file.name, size: file.size, mimeType: file.type || "application/octet-stream" });
-      await uploadWithProgress(pending.uploadUrl, file, setUploadProgress);
+      await uploadWithProgress(pending, file, setUploadProgress);
       await completeUpload.mutateAsync({ fileId: pending.fileId, storageKey: pending.storageKey });
       await filesQuery.refetch();
       toast.success(`${file.name} is ready in your shelf.`);
